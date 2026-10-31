@@ -1,0 +1,35 @@
+---
+name: npm-probe
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: |
+          echo "npm=$(npm --version) node=$(node --version) cwd=$(pwd)"
+          mkdir -p a/evil b c d/modules
+          # a) file: dependency with a file: key in allowScripts
+          printf '%s\n' '{"name":"evil","version":"1.0.0","scripts":{"postinstall":"node p.js"}}' > a/evil/package.json
+          printf '%s\n' 'require("fs").writeFileSync("/tmp/M_A","A");console.log("MARKER_A_file_key")' > a/evil/p.js
+          ( cd a/evil && npm pack --pack-destination .. >/dev/null 2>&1 )
+          printf '%s\n' '{"name":"a","version":"1.0.0","dependencies":{"evil":"file:./evil-1.0.0.tgz"},"allowScripts":{"file:./evil-1.0.0.tgz":true}}' > a/package.json
+          echo "===== A file-key"
+          ( cd a && npm install --no-save github:AdobeDocs/adp-devsite-scripts 2>&1 | tail -8; echo "markerA=$(cat /tmp/M_A 2>&1)" )
+          # b) root preinstall/postinstall in the project root
+          printf '%s\n' '{"name":"b","version":"1.0.0","scripts":{"preinstall":"node -e \"require(\\\"fs\\\").writeFileSync(\\\"/tmp/M_B\\\",\\\"B\\\");console.log(\\\"MARKER_B_preinstall\\\")\"","postinstall":"node -e \"require(\\\"fs\\\").writeFileSync(\\\"/tmp/M_B2\\\",\\\"B2\\\");console.log(\\\"MARKER_B_postinstall\\\")\""}}' > b/package.json
+          echo "===== B root scripts"
+          ( cd b && npm install --no-save github:AdobeDocs/adp-devsite-scripts 2>&1 | tail -8; echo "markerB=$(cat /tmp/M_B 2>&1) markerB2=$(cat /tmp/M_B2 2>&1)" )
+          # c) root install script in the real workspace root
+          printf '%s\n' '{"name":"c","version":"1.0.0","scripts":{"preinstall":"node -e \"require(\\\"fs\\\").writeFileSync(\\\"/tmp/M_C\\\",\\\"C\\\");console.log(\\\"MARKER_C_preinstall\\\")\""}}' > package.json
+          echo "===== C workspace root scripts"
+          npm install --no-save github:AdobeDocs/adp-devsite-scripts 2>&1 | tail -8
+          echo "markerC=$(cat /tmp/M_C 2>&1)"
+          # d) pre-seeded node_modules copy of the dependency
+          mkdir -p d/node_modules/adp-devsite-scripts/linter-bot
+          printf '%s\n' '{"name":"adp-devsite-scripts","version":"1.0.0"}' > d/node_modules/adp-devsite-scripts/package.json
+          printf '%s\n' 'console.log("MARKER_D_executed")' > d/node_modules/adp-devsite-scripts/linter-bot/postLinterReport.js
+          echo "===== D preseeded node_modules"
+          ( cd d && npm install --no-save github:AdobeDocs/adp-devsite-scripts 2>&1 | tail -6; echo "--- D file now:"; head -2 node_modules/adp-devsite-scripts/linter-bot/postLinterReport.js 2>&1; node node_modules/adp-devsite-scripts/linter-bot/postLinterReport.js 2>&1 | head -3 )
