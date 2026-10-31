@@ -1,0 +1,62 @@
+name: npm-probe2
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        run: |
+          set +e
+          echo "npm=$(npm --version) node=$(node --version)"
+          echo "===== config"
+          npm config ls -l 2>&1 | grep -iE 'script|allow|node-options|shell' | head -40
+          echo "===== install-scripts help"
+          npm install-scripts --help 2>&1 | head -30
+          echo "===== A root pre/post"
+          rm -rf /tmp/MA /tmp/MA2; mkdir -p a; cd a
+          cat > package.json <<'EOF'
+          {"name":"a","version":"1.0.0","scripts":{"preinstall":"node -e \"require('fs').writeFileSync('/tmp/MA','A')\"","postinstall":"node -e \"require('fs').writeFileSync('/tmp/MA2','A2')\""}}
+          EOF
+          npm install --no-save github:AdobeDocs/adp-devsite-scripts 2>&1 | tail -8
+          echo "markerA=$(cat /tmp/MA 2>&1) markerA2=$(cat /tmp/MA2 2>&1)"
+          cd ..
+          echo "===== B root preinstall + .npmrc"
+          rm -rf /tmp/MB; mkdir -p b; cd b
+          cat > package.json <<'EOF'
+          {"name":"b","version":"1.0.0","scripts":{"preinstall":"node -e \"require('fs').writeFileSync('/tmp/MB','B')\""}}
+          EOF
+          printf 'foreground-scripts=true\n' > .npmrc
+          npm install --no-save github:AdobeDocs/adp-devsite-scripts 2>&1 | tail -6
+          echo "markerB=$(cat /tmp/MB 2>&1)"
+          cd ..
+          echo "===== C preseeded node_modules"
+          rm -rf c; mkdir -p c/node_modules/adp-devsite-scripts/linter-bot; cd c
+          printf '%s\n' '{"name":"adp-devsite-scripts","version":"9.9.9"}' > node_modules/adp-devsite-scripts/package.json
+          printf '%s\n' 'console.log("MARKER_C_executed_attacker_file")' > node_modules/adp-devsite-scripts/linter-bot/postLinterReport.js
+          printf '%s\n' '{"name":"c","version":"1.0.0"}' > package.json
+          npm install --no-save github:AdobeDocs/adp-devsite-scripts 2>&1 | tail -5
+          echo "--- C file head:"; head -3 node_modules/adp-devsite-scripts/linter-bot/postLinterReport.js 2>&1
+          node node_modules/adp-devsite-scripts/linter-bot/postLinterReport.js 2>&1 | head -4
+          cd ..
+          echo "===== D overrides file spec"
+          rm -rf d; mkdir -p d/evil; cd d
+          printf '%s\n' '{"name":"adp-devsite-scripts","version":"9.9.9"}' > evil/package.json
+          printf '%s\n' 'console.log("MARKER_D_executed")' > evil/postLinterReport.js
+          ( cd evil && npm pack --pack-destination .. >/dev/null 2>&1 )
+          printf '%s\n' '{"name":"d","version":"1.0.0","overrides":{"adp-devsite-scripts":"file:./adp-devsite-scripts-9.9.9.tgz"}}' > package.json
+          npm install --no-save github:AdobeDocs/adp-devsite-scripts 2>&1 | tail -6
+          echo "--- D file head:"; head -3 node_modules/adp-devsite-scripts/postLinterReport.js 2>&1
+          echo "===== E dep with allowScripts variants"
+          cd ..
+          for v in '{"evilpoc":true}' '["evilpoc"]' '{"evilpoc@1.0.0":true}'; do
+            rm -rf e; mkdir -p e/evilpoc; cd e
+            printf '%s\n' '{"name":"evilpoc","version":"1.0.0","scripts":{"postinstall":"node p.js"}}' > evilpoc/package.json
+            printf '%s\n' 'require("fs").writeFileSync("/tmp/ME","E")' > evilpoc/p.js
+            ( cd evilpoc && npm pack --pack-destination .. >/dev/null 2>&1 )
+            printf '{"name":"e","version":"1.0.0","dependencies":{"evilpoc":"file:./evilpoc-1.0.0.tgz"},"allowScripts":%s}\n' "$v" > package.json
+            npm install --no-save github:AdobeDocs/adp-devsite-scripts >/dev/null 2>&1
+            echo "allowScripts=$v marker=$(cat /tmp/ME 2>&1)"; rm -f /tmp/ME
+            cd ..
+          done
